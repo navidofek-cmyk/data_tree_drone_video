@@ -17,5 +17,6 @@ viewer/cloud.ply
 *.png
 
 # necháváme: zdroje, dokumentaci, make_geo.py, strom_colab.ipynb,
-# DJI_*.SRT (telemetrie, ~600 kB) a viewer/tree.ply (malá ukázka)
+# DJI_*.SRT (telemetrie, ~600 kB), viewer/tree.ply (ukázka) a ilustrace do učebnice
 !viewer/tree.ply
+!doc/images/*.png

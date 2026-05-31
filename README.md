@@ -8,6 +8,11 @@ Z **videa obletu stromu pořízeného DJI dronem** vyrobit **mračno bodů ve fo
 > nejde o „pravý" lidar — stejný **typ dat (mračno bodů)** ale dostaneme přes
 > **Structure-from-Motion + Multi-View Stereo (SfM+MVS)**.
 
+![Viewer s mračnem stromu](doc/images/viewer_tree.png)
+
+> Učebnicový rozbor hlavních konceptů (fotogrammetrie, geodézie, 3D grafika, C++/Qt, vlákna)
+> je v [`UCEBNICE.md`](UCEBNICE.md).
+
 ## Obsah
 1. [Jak to funguje](#1-jak-to-funguje)
 2. [Prostředí a omezení](#2-prostředí-a-omezení)

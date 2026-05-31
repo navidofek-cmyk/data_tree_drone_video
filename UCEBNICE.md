@@ -9,6 +9,10 @@ fotky stromu (z videa)  →  KDE byla kamera + KDE jsou body  →  mračno bodů
         kap. 3.2/3.3              kap. 3.1/3.3/3.4               kap. 2/4         kap. 6
 ```
 
+Výsledek (mračno z videa) — pohled shora/z boku, barvy a výška:
+
+![Přehled scény](doc/images/scene_overview.png)
+
 Obsah:
 1. [Proč vůbec mračno bodů](#1-proč-vůbec-mračno-bodů)
 2. [Formát LAS — jak se mračno ukládá](#2-formát-las)
@@ -17,8 +21,9 @@ Obsah:
 5. [Telemetrie: SRT → geo.txt](#5-telemetrie-srt--geotxt)
 6. [Jak nakreslit 3D na 2D obrazovku](#6-jak-nakreslit-3d-na-2d-obrazovku)
 7. [C++ a Qt: jak je viewer postavený](#7-c-a-qt-jak-je-viewer-postavený)
-8. [Inženýrské lekce](#8-inženýrské-lekce)
-9. [Slovníček a cvičení](#9-slovníček-a-cvičení)
+8. [Vlákna, paměť a kdo na co čeká](#8-vlákna-paměť-a-kdo-na-co-čeká)
+9. [Inženýrské lekce](#9-inženýrské-lekce)
+10. [Slovníček a cvičení](#10-slovníček-a-cvičení)
 
 ---
 
@@ -125,6 +130,10 @@ Tahle fáze je **výpočetně nejdražší** (a na CPU nejvíc hřeje; na GPU le
 
 **Proto** náš mladý stromek vyšel nahoře řídký — fotogrammetrie tenké větvičky neutáhne.
 
+Vyříznutý strom (boční pohledy): koruna ve výšce ~1–4 m nad terénem, nahoře řídká:
+
+![Crop stromu z boku](doc/images/tree_crop.png)
+
 ---
 
 ## 4) Souřadnice a georeference
@@ -148,6 +157,10 @@ ukotvit na známé souřadnice — u nás GPS z dronu.
 **V projektu.** `geo.txt` (krok 4.2) dá ODM GPS → ODM zarovná a převede do UTM (metry).
 V Colab variantě totéž dělá `colmap model_aligner` (proto se tam lon/lat prohazuje na lat/lon).
 
+Hledání stromu přes filtr vegetace (zelené body) — pohled shora, `+` = střed obletu kamer:
+
+![Vegetace shora](doc/images/vegetation_topdown.png)
+
 ---
 
 ## 5) Telemetrie: SRT → geo.txt
@@ -169,6 +182,10 @@ a zapíše řádky `jméno lon lat alt` (formát, co чека ODM, hlavička `EP
 
 Tohle je celý `viewer/` a je to malý kurz 3D grafiky. Renderer je **softwarový** (počítáme
 pixely sami v C++), což je super na pochopení principů (žádná „magie GPU").
+
+Náš viewer (perspektiva, mřížka, gizmo X/Y/Z vpravo nahoře, tlačítka, řezy):
+
+![Viewer — strom](doc/images/viewer_tree.png)
 
 ### 6.1 Rotace a projekce
 **Intuice.** Pohled = otočím scénu (myší) a pak ji „splácnu" na obrazovku.
@@ -340,7 +357,78 @@ Tři malé soubory, jasné role: `main` (spuštění), `MainWindow` (okno+panel)
 
 ---
 
-## 8) Inženýrské lekce
+## 8) Vlákna, paměť a kdo na co čeká
+
+**Intuice.** *Vlákno* (thread) = nezávislý proud výpočtu uvnitř programu; víc vláken běží
+„najednou" na víc jádrech. Dvě motivace: (1) **GUI nesmí zamrznout** — dlouhý výpočet patří
+mimo hlavní vlákno; (2) **využít všechna jádra** — rozdělit práci.
+
+### A) Hlavní (GUI) vlákno a event loop
+`app.exec()` (kap. 7) běží v **hlavním vlákně** a tam se **smí kreslit a sahat na widgety**.
+To vlákno „čeká" na události a obsluhuje je. Když do něj dáš dlouhý výpočet, okno se přestane
+překreslovat (zamrzne). **V našem vieweru** je render rychlý, takže jede jednovláknově — ale
+kdyby se načítalo obří mračno, patří to do worker vlákna (viz cvičení).
+
+### B) Worker vlákno + bezpečná komunikace (reálný příklad: `SolverWorker`)
+V sousedním `cfd_simple_cube_qt` běží výpočet ve **vlastním vlákně** a s GUI mluví **jen přes
+signály/sloty** — Qt zprávu **bezpečně předá** do fronty cílového vlákna (queued connection),
+takže se nesahá na widget z cizího vlákna.
+```cpp
+// SolverWorker.hpp (zkráceno)
+public slots:  void run(SimParams p);            // poběží ve worker vlákně
+signals:       void iteration(int it, double r); // → GUI je dostane ve své frontě
+               void finished(bool ok, int iters);
+private:
+    std::atomic<bool> stopRequested_{false};     // čte se za běhu smyčky, BEZ zámku
+```
+**Kdo na co čeká:** GUI **nečeká** — běží dál a reaguje (třeba na tlačítko Stop). Worker počítá
+a posílá průběh; GUI si snapshoty vyzvedne, až na ně ve své smyčce „dojde". Stop se předá přes
+**`std::atomic<bool>`** — proměnnou, kterou smí číst/psát víc vláken **bez porušení** (atomická
+operace). Proto `stop()` jen nastaví `stopRequested_=true` a výpočetní smyčka to při další
+iteraci uvidí.
+
+### C) Datová paralelizace (víc jader na jednu úlohu)
+Když chceš úlohu zrychlit, rozdělíš data mezi vlákna.
+- **OpenMP** v CFD řešiči: `omp_set_num_threads(...)` → smyčka přes buňky mřížky běží paralelně.
+- **Naše pipeline:** ODM/OpenMVS a `ffmpeg -threads` dělají totéž interně. Když jsi v monitoru
+  viděl **CPU 400 %**, znamenalo to ~4 běžící vlákna (4 jádra naplno); OpenMVS si v špičce vzal
+  i ~1000 % (10 jader), protože má **vlastní** správu vláken nezávislou na `--max-concurrency`.
+
+### D) Na co si dát pozor (synchronizace)
+- **Race condition** (souběh): dvě vlákna sahají na stejnou paměť a aspoň jedno zapisuje →
+  nedefinovaný výsledek. Řeší se **zámkem (`std::mutex`)** nebo **atomikou** (pro jednoduché
+  vlajky/čítače je atomika levnější — viz `stopRequested_`).
+- **Deadlock**: A čeká na zámek, co drží B, a B čeká na zámek, co drží A → stojí navždy.
+  ("Kdo na co čeká" do kruhu.) Prevence: ber zámky vždy ve stejném pořadí, drž je krátce.
+- **Pravidlo Qt:** s widgety/GUI pracuj jen z hlavního vlákna; mezi vlákny posílej **signály**
+  (Qt zařídí bezpečné předání), ne přímé volání.
+
+### E) Paměť — kde data leží
+- **Zásobník (stack):** lokální proměnné, malé a krátkožijící (`double x`, `QPointF p`).
+  Automaticky se uklidí na konci scope.
+- **Halda (heap):** velká/dlouhožijící data. Náš `std::vector<ClPoint> pts_` drží mračno na
+  haldě: 1,33 M × `sizeof(ClPoint)` (3×`float` + 3×`uint8_t` ≈ 16 B) ≈ **~21 MB**. `std::vector`
+  si haldu spravuje sám (alokace/uvolnění) — to je **RAII**.
+- **Per-snímek alokace:** v `renderInto` vzniká `std::vector<float> zbuf` o velikosti `w*h`
+  na každé překreslení a po něm se uvolní — krátkožijící, ale velké; proto ho nechceme zbytečně
+  velký (a proto `--max` podvzorkování u velkých mračen).
+- **Vlastnictví:** `std::unique_ptr<ChannelSolver> sim_` (jediný vlastník, uvolní se sám) a
+  **Qt strom rodič–dítě** (kap. 7) — kdo „vlastní", ten uklízí. Sdílené atomiky naopak žijí tak
+  dlouho, dokud žije worker, a sahají na ně obě vlákna.
+- **Reference vs kopie:** `for (const auto& p : pts_)` jede přes **reference** — kdyby tam bylo
+  `auto p` (kopie), kopírovali bychom 21 MB bodů zbytečně. Detail, který u miliónů prvků rozhoduje.
+
+### F) Souběh i mimo program (procesy a čekání v naší pipeline)
+Paralelně neběží jen vlákna, ale i **procesy**:
+- ODM jsme spustili **na pozadí** (`&` / background task) → hlavní shell „nečekal".
+- **Watchdog** byl samostatná smyčka, co `sleep 15` (spí = čeká) a každých 15 s četl teplotu;
+  při >90 °C poslal `docker stop` (signál procesu, ať skončí).
+- **Monitor** četl ODM log (fáze k/13, %). My (agent) jsme „čekali" na **task-notification**, až
+  ODM doběhne. To je úplně stejný princip „kdo na co čeká", jen na úrovni procesů, ne vláken.
+
+---
+
+## 9) Inženýrské lekce
 
 Projekt není jen matematika — hodně se naučíš na omezeních:
 
@@ -360,7 +448,7 @@ Projekt není jen matematika — hodně se naučíš na omezeních:
 
 ---
 
-## 9) Slovníček a cvičení
+## 10) Slovníček a cvičení
 
 **Slovníček**
 - **Point cloud / mračno bodů** — seznam 3D bodů (+ barva/atributy).
@@ -374,6 +462,12 @@ Projekt není jen matematika — hodně se naučíš na omezeních:
 - **Z-buffer** — kdo je blíž, ten je vidět.
 - **Ortho/perspektiva** — bez/s dělením hloubkou.
 - **GLX / indirect rendering** — OpenGL přes síťové X11 (proto raději software render).
+- **Vlákno (thread)** — nezávislý proud výpočtu; víc jich běží na víc jádrech.
+- **Event loop** — smyčka (`app.exec()`), co čeká na události a volá tvoje handlery.
+- **Race condition / mutex / atomic** — souběžný přístup k paměti / zámek / lock-free proměnná.
+- **Deadlock** — vlákna se navzájem čekají dokola a stojí.
+- **Zásobník vs halda (stack/heap)** — malé krátkožijící vs velké/dlouhožijící data.
+- **RAII** — zdroj se uklidí v destruktoru (`std::vector`, `unique_ptr`, `ifstream`, `QPainter`).
 
 **Cvičení (od lehkého)**
 1. Vypiš hlavičku LAS (kap. 2) a spočítej výšku scény z `mins/maxs[2]`.
@@ -384,6 +478,8 @@ Projekt není jen matematika — hodně se naučíš na omezeních:
    počet bodů a detail stromu.
 6. Doplň do vieweru **obarvení podle výšky** (místo RGB barvu po čítej z `z`) — malý zásah do
    `renderInto`, hodně se naučíš o mapování hodnota→barva.
+7. (vlákna) Načti velký PLY **ve worker vlákně** (`QThread`/`std::thread`), GUI ať nezamrzne;
+   po dokončení pošli **signál** „hotovo, překresli" — viz vzor `SolverWorker` (kap. 8).
 
 **Kam dál:** COLMAP/OpenDroneMap dokumentace (SfM/MVS), „Multiple View Geometry" (Hartley &
 Zisserman) na teorii, „Real-Time Rendering" / LearnOpenGL na grafiku, PDAL/laspy na práci s LAS.
