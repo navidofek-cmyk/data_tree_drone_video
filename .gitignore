@@ -1,0 +1,21 @@
+# Prostředí / build
+.venv/
+viewer/build/
+__pycache__/
+*.pyc
+.claude/
+
+# Klon třetí strany (má vlastní git)
+3d-forest/
+
+# Velká / generovaná data (reprodukovatelná dle README)
+DJI_*.MP4
+odm_project/
+viewer/cloud.ply
+*.las
+*.laz
+*.png
+
+# necháváme: zdroje, dokumentaci, make_geo.py, strom_colab.ipynb,
+# DJI_*.SRT (telemetrie, ~600 kB) a viewer/tree.ply (malá ukázka)
+!viewer/tree.ply
