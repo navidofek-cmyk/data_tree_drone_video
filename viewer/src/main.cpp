@@ -5,6 +5,7 @@
 #include <QString>
 #include <cstdio>
 
+// Vstupní bod programu.
 // Použití:
 //   viewer [cesta.ply] [--max N] [--snapshot out.png [W H]]
 //
@@ -12,10 +13,11 @@
 //   --snapshot ... vykreslí jeden snímek do PNG a skončí (test bez displeje:
 //                  QT_QPA_PLATFORM=offscreen viewer cloud.ply --snapshot x.png)
 int main(int argc, char** argv) {
-    QApplication app(argc, argv);
+    QApplication app(argc, argv);   // inicializace Qt (musí být první)
 
+    // ── výchozí hodnoty + jednoduché parsování argumentů ────────────────────
     QString path = "cloud.ply";
-    QString snap;
+    QString snap;                   // neprázdné = režim snímku do PNG
     int maxp = 0, sw = 1000, sh = 700;
 
     for (int i = 1; i < argc; ++i) {
@@ -23,14 +25,15 @@ int main(int argc, char** argv) {
         if (a == "--max" && i+1 < argc)       maxp = QString(argv[++i]).toInt();
         else if (a == "--snapshot" && i+1 < argc) {
             snap = argv[++i];
+            // volitelná šířka/výška za názvem souboru
             if (i+2 < argc && QString(argv[i+1]).toInt() > 0) {
                 sw = QString(argv[++i]).toInt();
                 sh = QString(argv[++i]).toInt();
             }
-        } else if (!a.startsWith("--")) path = a;
+        } else if (!a.startsWith("--")) path = a;   // poziční argument = cesta k PLY
     }
 
-    // headless: render do PNG bez okna (i panel řezů netřeba)
+    // ── headless režim: vyrenderuj PNG bez okna a skonči (netřeba event loop) ─
     if (!snap.isEmpty()) {
         PointCloudView view;
         if (!view.load(path, maxp)) {
@@ -44,7 +47,7 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    // interaktivně: okno s 3D pohledem + panelem řezacích rovin
+    // ── interaktivní režim: okno s 3D pohledem + panelem řezacích rovin ──────
     MainWindow win;
     if (!win.load(path, maxp)) {
         std::fprintf(stderr, "Nelze načíst PLY: %s\n", path.toUtf8().constData());
@@ -53,5 +56,5 @@ int main(int argc, char** argv) {
     win.setWindowTitle("Point Cloud Viewer — " + path);
     win.resize(1220, 760);
     win.show();
-    return app.exec();
+    return app.exec();   // spusť smyčku událostí (běží, dokud se okno nezavře)
 }
